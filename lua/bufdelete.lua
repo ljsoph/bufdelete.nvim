@@ -12,7 +12,7 @@ local state = {
   },
 }
 
-local function create_floating_window(buffers, opts)
+local function create_window(buffers, opts)
   opts = opts or {}
 
   local width = math.floor(vim.o.columns * 0.3)
@@ -119,6 +119,13 @@ local remove_buffers = function()
     end
   end
 
+  -- Create an empty buffer if we are deleting all open buffers so the last one can be unloaded
+  if next(to_keep) == nil then
+    local new_buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_set_current_buf(new_buf)
+    vim.api.nvim_win_set_buf(0, new_buf)
+  end
+
   for _, buf in ipairs(state.buffers) do
     local found = false
     for _, bufnr in ipairs(to_keep) do
@@ -129,10 +136,8 @@ local remove_buffers = function()
     end
 
     if not found then
-      local current_bufnr = vim.api.nvim_get_current_buf()
-      print(string.format("[%d] removing %d | %s", current_bufnr, buf.bufnr, buf.name))
-      -- vim.bo[buf.bufnr].buflisted = false
-      -- vim.api.nvim_buf_delete(buf.bufnr, { unload = true, force = true })
+      vim.bo[buf.bufnr].buflisted = false
+      vim.api.nvim_buf_delete(buf.bufnr, { unload = true })
     end
   end
 end
@@ -143,7 +148,7 @@ M.toggle = function()
     remove_buffers()
   else
     state.buffers = get_open_buffers()
-    state.window = create_floating_window(to_buffer_lines(state.buffers), { buf = state.window.buf })
+    state.window = create_window(to_buffer_lines(state.buffers), { buf = state.window.buf })
   end
 
   vim.api.nvim_create_autocmd("BufLeave", {
@@ -153,10 +158,5 @@ M.toggle = function()
     end,
   })
 end
-
-vim.api.nvim_create_user_command("BufDeleteToggle", function()
-  M.toggle()
-  -- require("bufdelete").toggle()
-end, {})
 
 return M
