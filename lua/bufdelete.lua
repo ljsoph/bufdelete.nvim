@@ -6,43 +6,11 @@ end
 
 local state = {
   buffers = {},
-  window = {
+  floaty = {
     buf = -1,
     win = -1,
   },
 }
-
-local function create_window(buffers, opts)
-  opts = opts or {}
-
-  local width = math.floor(vim.o.columns * 0.3)
-  local height = math.floor(vim.o.lines * 0.3)
-  local col = math.floor((vim.o.columns - width) / 2)
-  local row = math.floor((vim.o.lines - height) / 2)
-
-  local buf = nil
-  if vim.api.nvim_buf_is_valid(opts.buf) then
-    buf = opts.buf
-  else
-    buf = vim.api.nvim_create_buf(false, true)
-  end
-
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, buffers)
-  vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
-
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    col = col,
-    row = row,
-    style = "minimal",
-    border = "rounded",
-    title = "Buffers",
-  })
-
-  return { buf = buf, win = win }
-end
 
 ---@param name string: Full path of file
 ---@param cwd string: Current working directory
@@ -109,7 +77,7 @@ local get_open_buffers = function()
 end
 
 local remove_buffers = function()
-  local new_lines = vim.api.nvim_buf_get_lines(state.window.buf, 0, -1, false)
+  local new_lines = vim.api.nvim_buf_get_lines(state.floaty.buf, 0, -1, false)
 
   local to_keep = {}
   for _, line in ipairs(new_lines) do
@@ -120,8 +88,10 @@ local remove_buffers = function()
   end
 
   -- Create an empty buffer if we are deleting all open buffers so the last one can be unloaded
+  local new_buf
   if next(to_keep) == nil then
-    local new_buf = vim.api.nvim_create_buf(true, false)
+    new_buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_delete(state.floaty.buf, { unload = true })
     vim.api.nvim_set_current_buf(new_buf)
     vim.api.nvim_win_set_buf(0, new_buf)
   end
@@ -142,19 +112,64 @@ local remove_buffers = function()
   end
 end
 
+local function create_window(buffers, opts)
+  opts = opts or {}
+
+  local width = math.floor(vim.o.columns * 0.3)
+  local height = math.floor(vim.o.lines * 0.3)
+  local col = math.floor((vim.o.columns - width) / 2)
+  local row = math.floor((vim.o.lines - height) / 2)
+
+  local buf = nil
+  if vim.api.nvim_buf_is_valid(opts.buf) then
+    buf = opts.buf
+  else
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_option_value("buftype", "acwrite", { buf = buf })
+    vim.api.nvim_buf_set_name(buf, "scratch")
+
+    vim.api.nvim_create_autocmd("BufWriteCmd", {
+      buffer = buf,
+      callback = function(params)
+        -- Set to unmodified so we don't get prompted to save changes
+        -- when we exit vim.
+        vim.bo[params.buf].modified = false
+        remove_buffers()
+        if vim.api.nvim_win_is_valid(state.floaty.win) then
+          vim.api.nvim_win_hide(state.floaty.win)
+        end
+      end,
+    })
+  end
+
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, buffers)
+
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    width = width,
+    height = height,
+    col = col,
+    row = row,
+    style = "minimal",
+    border = "rounded",
+    title = "Buffers",
+  })
+
+  return { buf = buf, win = win }
+end
+
 M.toggle = function()
-  if vim.api.nvim_win_is_valid(state.window.win) then
-    vim.api.nvim_win_hide(state.window.win)
-    remove_buffers()
+  if vim.api.nvim_win_is_valid(state.floaty.win) then
+    vim.api.nvim_win_hide(state.floaty.win)
   else
     state.buffers = get_open_buffers()
-    state.window = create_window(to_buffer_lines(state.buffers), { buf = state.window.buf })
+    state.floaty = create_window(to_buffer_lines(state.buffers), { buf = state.floaty.buf })
   end
 
   vim.api.nvim_create_autocmd("BufLeave", {
-    buffer = state.window.buf,
+    buffer = state.floaty.buf,
     callback = function()
-      pcall(vim.api.nvim_win_close, state.window.win, true)
+      pcall(vim.api.nvim_win_close, state.floaty.win, true)
     end,
   })
 end
