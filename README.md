@@ -16,6 +16,10 @@ https://github.com/user-attachments/assets/76be500b-6577-4f10-9859-3398a2dbe97f
 
 ## Usage
 
-Simply toggle the buffer list with `:BufDeleteToggle` and remove the lines containing the buffers you wish to close.
+Open the current buffer list with `:BufDeleteToggle` and remove the lines containing the buffers you wish to close. 
 
-Toggle once more to delete the removed buffers. This has the same effect of calling `:bdelete` on each buffer.
+Once saved, this will have the same effect of calling `:bdelete` on each buffer removed from the list.
+
+> [!WARNING]
+> To apply your changes you must save! Closing the buffer list (with `:q` or `:BufDeleteToggle`) will have no effect.
+
