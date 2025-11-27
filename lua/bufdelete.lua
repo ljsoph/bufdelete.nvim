@@ -6,8 +6,10 @@ end
 
 local state = {
   buffers = {},
-  buf = -1,
-  win = -1,
+  current_win = -1,
+  current_buf = -1,
+  floating_win = -1,
+  floating_buf = -1,
 }
 
 ---@param name string: Full path of file
@@ -21,7 +23,6 @@ end
 ---@class bufdelete.Buffer
 ---@field bufnr number: Buffer number
 ---@field name string: Full path of file
----@field lnum number: Current line number in the open buffer
 ---
 ---@param bufs bufdelete.Buffer[]
 ---@return string[]
@@ -61,7 +62,6 @@ local get_open_buffers = function()
     local item = {
       bufnr = bufnr,
       name = info.name,
-      lnum = info.lnum,
     }
 
     if in_cwd(info.name, cwd) then
@@ -72,24 +72,25 @@ local get_open_buffers = function()
   end
 end
 
-local remove_buffers = function()
-  local new_lines = vim.api.nvim_buf_get_lines(state.buf, 0, -1, false)
+local delete_buffers = function()
+  local new_lines = vim.api.nvim_buf_get_lines(state.floating_buf, 0, -1, false)
 
   local to_keep = {}
   for _, line in ipairs(new_lines) do
     local match = line:match("%d+")
     if match ~= nil then
-      table.insert(to_keep, tonumber(match))
+      local bufnr = tonumber(match)
+      table.insert(to_keep, tonumber(bufnr))
     end
   end
 
   -- Create an empty buffer if we are deleting all open buffers so the last one can be unloaded
-  if next(to_keep) == nil then
+  local next_buf = next(to_keep)
+  if next_buf == nil then
     local new_buf = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = new_buf })
-    vim.api.nvim_buf_delete(state.buf, { unload = true })
-    vim.api.nvim_set_current_buf(new_buf)
-    vim.api.nvim_win_set_buf(0, new_buf)
+    vim.api.nvim_buf_delete(state.floating_buf, { unload = true })
+    vim.api.nvim_win_set_buf(state.current_win, new_buf)
   end
 
   for _, buf in ipairs(state.buffers) do
@@ -104,6 +105,10 @@ local remove_buffers = function()
     if not found then
       vim.bo[buf.bufnr].buflisted = false
       vim.api.nvim_buf_delete(buf.bufnr, { unload = true })
+
+      if buf.bufnr == state.current_buf and next_buf ~= nil then
+        vim.api.nvim_win_set_buf(state.current_win, next_buf)
+      end
     end
   end
 end
@@ -116,9 +121,9 @@ local function create_window(buffers, opts)
   local col = math.floor((vim.o.columns - width) / 2)
   local row = math.floor((vim.o.lines - height) / 2)
 
-  if vim.api.nvim_buf_is_valid(state.buf) then
-    vim.bo[state.buf].buflisted = false
-    vim.api.nvim_buf_delete(state.buf, { force = true })
+  if vim.api.nvim_buf_is_valid(state.floating_buf) then
+    vim.bo[state.floating_buf].buflisted = false
+    vim.api.nvim_buf_delete(state.floating_buf, { force = true })
   end
 
   local buf = vim.api.nvim_create_buf(false, true)
@@ -143,7 +148,7 @@ local function create_window(buffers, opts)
       -- Set to unmodified so we don't get prompted to save changes
       -- when we exit vim.
       vim.bo[params.buf].modified = false
-      remove_buffers()
+      delete_buffers()
 
       if vim.api.nvim_buf_is_valid(params.buf) then
         vim.bo[params.buf].buflisted = false
@@ -169,18 +174,20 @@ local function create_window(buffers, opts)
   vim.api.nvim_create_autocmd("BufLeave", {
     buffer = buf,
     callback = function()
-      pcall(vim.api.nvim_win_close, state.win, true)
+      pcall(vim.api.nvim_win_close, state.floating_win, true)
     end,
   })
 
-  state.buf = buf
-  state.win = win
+  state.floating_buf = buf
+  state.floating_win = win
 end
 
 M.toggle = function()
-  if vim.api.nvim_win_is_valid(state.win) then
-    vim.api.nvim_win_close(state.win, true)
+  if vim.api.nvim_win_is_valid(state.floating_win) then
+    vim.api.nvim_win_close(state.floating_win, true)
   else
+    state.current_buf = vim.api.nvim_get_current_buf()
+    state.current_win = vim.api.nvim_get_current_win()
     get_open_buffers()
     create_window(to_buffer_lines(state.buffers))
   end
