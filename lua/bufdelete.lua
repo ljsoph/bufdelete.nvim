@@ -55,7 +55,7 @@ local get_open_buffers = function()
     return true
   end, vim.api.nvim_list_bufs())
 
-  state.buffers = {}
+  local buffers = {}
   for _, bufnr in ipairs(bufnrs) do
     local info = vim.fn.getbufinfo(bufnr)[1]
 
@@ -68,8 +68,10 @@ local get_open_buffers = function()
       item.name = string.sub(info.name, #cwd + 2)
     end
 
-    table.insert(state.buffers, item)
+    table.insert(buffers, item)
   end
+
+  return buffers
 end
 
 local delete_buffers = function()
@@ -142,6 +144,10 @@ local function create_window(buffers, opts)
     title = "Buffers",
   })
 
+  return { buf = buf, win = win }
+end
+
+local setup_autocommands = function(buf, win)
   vim.api.nvim_create_autocmd("BufWriteCmd", {
     buffer = buf,
     callback = function(params)
@@ -178,8 +184,17 @@ local function create_window(buffers, opts)
     end,
   })
 
-  state.floating_buf = buf
-  state.floating_win = win
+  vim.keymap.set("n", "<ESC>", function()
+    vim.api.nvim_win_close(win, true)
+  end, {
+    buffer = buf,
+  })
+
+  vim.keymap.set("n", "q", function()
+    vim.api.nvim_win_close(win, true)
+  end, {
+    buffer = buf,
+  })
 end
 
 M.toggle = function()
@@ -188,8 +203,15 @@ M.toggle = function()
   else
     state.current_buf = vim.api.nvim_get_current_buf()
     state.current_win = vim.api.nvim_get_current_win()
-    get_open_buffers()
-    create_window(to_buffer_lines(state.buffers))
+    state.buffers = get_open_buffers()
+
+    local buffers = to_buffer_lines(state.buffers)
+    local floaty_bits = create_window(buffers)
+
+    state.floating_buf = floaty_bits.buf
+    state.floating_win = floaty_bits.win
+
+    setup_autocommands(state.floating_buf, state.floating_win)
   end
 end
 
