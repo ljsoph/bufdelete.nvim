@@ -15,7 +15,27 @@ local default_config = {
 }
 
 function M.setup(opts)
-  config = vim.tbl_deep_extend("force", default_config, opts or {})
+  local invalid_config = false
+
+  if type(config.width) == "string" and config.width ~= "shrink" then
+    M.error("invalid width configuration - available options ['shrink']")
+    invalid_config = true
+  end
+
+  if type(config.height) == "string" and config.width ~= "shrink" then
+    M.error("invalid height configuration - available options ['shrink']")
+    invalid_config = true
+  end
+
+  if invalid_config then
+    config = default_config
+  else
+    config = vim.tbl_deep_extend("force", default_config, opts or {})
+  end
+end
+
+function M.error(msg, opts)
+  vim.notify(msg, vim.log.levels.ERROR, opts or {})
 end
 
 local state = {
@@ -52,6 +72,16 @@ local to_buffer_lines = function(bufs)
   end
 
   return buffer_lines
+end
+
+---@param values string[]
+---@return integer
+local function max_width(values)
+  local acc = 0
+  for _, value in ipairs(values) do
+    acc = math.max(acc, #value)
+  end
+  return acc
 end
 
 local get_open_buffers = function()
@@ -128,42 +158,49 @@ local delete_buffers = function()
   end
 end
 
-local function create_window_opts()
-  local clamped_width = math.min(1.0, math.max(config.width, 0.10))
-  local clamped_height = math.min(1.0, math.max(config.height, 0.10))
-  local width
-  local height
-  local col
-  local row
-  local anchor = "NW"
-
-  if config.floating then
-    width = math.floor(vim.o.columns * clamped_width)
-    height = math.floor(vim.o.lines * clamped_height)
-    col = math.floor((vim.o.columns - width) / 2)
-    row = math.floor((vim.o.lines - height) / 2)
-  else
-    anchor = "SW"
-    width = vim.o.columns
-    height = math.floor(vim.o.lines * clamped_height)
-    col = 0
-    row = vim.o.lines
-  end
-
-  return {
+local function create_window_opts(lines)
+  local win_opts = {
     relative = "editor",
-    anchor = anchor,
-    width = width,
-    height = height,
-    col = col,
-    row = row,
     style = "minimal",
     border = "single",
     title = "Buffers",
     title_pos = "center",
   }
+
+  if config.floating then
+    if config.width == "shrink" then
+      win_opts.width = max_width(lines)
+    else
+      win_opts.width = math.floor(vim.o.columns * math.min(1.0, math.max(config.width, 0.10)))
+    end
+
+    if config.height == "shrink" then
+      win_opts.height = #lines + config.padding.top + config.padding.bottom
+    else
+      win_opts.height = math.floor(vim.o.lines * math.min(1.0, math.max(config.height, 0.10)))
+    end
+
+    win_opts.col = math.floor((vim.o.columns - win_opts.width) / 2)
+    win_opts.row = math.floor((vim.o.lines - win_opts.height) / 2)
+  else
+    -- If 'shrink' was specified with a anchored window then use the default height
+    if type(config.height) == "string" then
+      win_opts.height = math.floor(vim.o.lines * math.min(1.0, math.max(default_config.height, 0.10)))
+    else
+      win_opts.height = math.floor(vim.o.lines * math.min(1.0, math.max(config.height, 0.10)))
+    end
+
+    win_opts.anchor = "SW"
+    win_opts.width = vim.o.columns
+    win_opts.col = 0
+    win_opts.row = vim.o.lines
+  end
+
+  return win_opts
 end
 
+---@param buffers string[]
+---@return string[]
 local function create_window(buffers)
   if vim.api.nvim_buf_is_valid(state.win_info.buf) then
     vim.bo[state.win_info.buf].buflisted = false
@@ -171,7 +208,7 @@ local function create_window(buffers)
   end
 
   local left_pad = string.rep(" ", config.padding.left)
-  local right_pad = string.rep(" ", config.padding.left)
+  local right_pad = string.rep(" ", config.padding.right)
   for index = 1, #buffers do
     buffers[index] = string.format("%s%s%s", left_pad, buffers[index], right_pad)
   end
@@ -189,8 +226,9 @@ local function create_window(buffers)
   vim.api.nvim_buf_set_name(buf, "scratch")
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, buffers)
 
-  local win_opts = create_window_opts()
+  local win_opts = create_window_opts(buffers)
   local win = vim.api.nvim_open_win(buf, true, win_opts)
+  vim.api.nvim_win_set_cursor(win, { config.padding.top + 1, config.padding.left })
 
   if config.cursorline then
     vim.api.nvim_set_option_value("cursorline", true, { win = win })
