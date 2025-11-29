@@ -1,15 +1,28 @@
 local M = {}
 
-M.setup = function()
-  -- no-op
+local config = {}
+local default_config = {
+  floating = true,
+  cursorline = true,
+  width = 0.3,
+  height = 0.3,
+  padding = {
+    top = 0,
+    left = 0,
+    right = 0,
+    bottom = 0,
+  },
+}
+
+function M.setup(opts)
+  config = vim.tbl_deep_extend("force", default_config, opts or {})
 end
 
 local state = {
   buffers = {},
   current_win = -1,
   current_buf = -1,
-  floating_win = -1,
-  floating_buf = -1,
+  win_info = { buf = -1, win = -1 },
 }
 
 ---@param name string: Full path of file
@@ -75,7 +88,7 @@ local get_open_buffers = function()
 end
 
 local delete_buffers = function()
-  local new_lines = vim.api.nvim_buf_get_lines(state.floating_buf, 0, -1, false)
+  local new_lines = vim.api.nvim_buf_get_lines(state.win_info.buf, 0, -1, false)
 
   local to_keep = {}
   for _, line in ipairs(new_lines) do
@@ -91,7 +104,7 @@ local delete_buffers = function()
   if next_buf == nil then
     local new_buf = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = new_buf })
-    vim.api.nvim_buf_delete(state.floating_buf, { unload = true })
+    vim.api.nvim_buf_delete(state.win_info.buf, { unload = true })
     vim.api.nvim_win_set_buf(state.current_win, new_buf)
   end
 
@@ -115,17 +128,60 @@ local delete_buffers = function()
   end
 end
 
-local function create_window(buffers, opts)
-  opts = opts or {}
+local function create_window_opts()
+  local clamped_width = math.min(1.0, math.max(config.width, 0.10))
+  local clamped_height = math.min(1.0, math.max(config.height, 0.10))
+  local width
+  local height
+  local col
+  local row
+  local anchor = "NW"
 
-  local width = math.floor(vim.o.columns * 0.3)
-  local height = math.floor(vim.o.lines * 0.3)
-  local col = math.floor((vim.o.columns - width) / 2)
-  local row = math.floor((vim.o.lines - height) / 2)
+  if config.floating then
+    width = math.floor(vim.o.columns * clamped_width)
+    height = math.floor(vim.o.lines * clamped_height)
+    col = math.floor((vim.o.columns - width) / 2)
+    row = math.floor((vim.o.lines - height) / 2)
+  else
+    anchor = "SW"
+    width = vim.o.columns
+    height = math.floor(vim.o.lines * clamped_height)
+    col = 0
+    row = vim.o.lines
+  end
 
-  if vim.api.nvim_buf_is_valid(state.floating_buf) then
-    vim.bo[state.floating_buf].buflisted = false
-    vim.api.nvim_buf_delete(state.floating_buf, { force = true })
+  return {
+    relative = "editor",
+    anchor = anchor,
+    width = width,
+    height = height,
+    col = col,
+    row = row,
+    style = "minimal",
+    border = "single",
+    title = "Buffers",
+    title_pos = "center",
+  }
+end
+
+local function create_window(buffers)
+  if vim.api.nvim_buf_is_valid(state.win_info.buf) then
+    vim.bo[state.win_info.buf].buflisted = false
+    vim.api.nvim_buf_delete(state.win_info.buf, { force = true })
+  end
+
+  local left_pad = string.rep(" ", config.padding.left)
+  local right_pad = string.rep(" ", config.padding.left)
+  for index = 1, #buffers do
+    buffers[index] = string.format("%s%s%s", left_pad, buffers[index], right_pad)
+  end
+
+  for _ = 1, config.padding.top do
+    table.insert(buffers, 1, "")
+  end
+
+  for _ = 1, config.padding.bottom do
+    table.insert(buffers, "")
   end
 
   local buf = vim.api.nvim_create_buf(false, true)
@@ -133,16 +189,12 @@ local function create_window(buffers, opts)
   vim.api.nvim_buf_set_name(buf, "scratch")
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, buffers)
 
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    col = col,
-    row = row,
-    style = "minimal",
-    border = "rounded",
-    title = "Buffers",
-  })
+  local win_opts = create_window_opts()
+  local win = vim.api.nvim_open_win(buf, true, win_opts)
+
+  if config.cursorline then
+    vim.api.nvim_set_option_value("cursorline", true, { win = win })
+  end
 
   return { buf = buf, win = win }
 end
@@ -180,7 +232,7 @@ local setup_autocommands = function(buf, win)
   vim.api.nvim_create_autocmd("BufLeave", {
     buffer = buf,
     callback = function()
-      pcall(vim.api.nvim_win_close, state.floating_win, true)
+      pcall(vim.api.nvim_win_close, state.win_info.win, true)
     end,
   })
 
@@ -198,20 +250,15 @@ local setup_autocommands = function(buf, win)
 end
 
 M.toggle = function()
-  if vim.api.nvim_win_is_valid(state.floating_win) then
-    vim.api.nvim_win_close(state.floating_win, true)
+  if vim.api.nvim_win_is_valid(state.win_info.win) then
+    vim.api.nvim_win_close(state.win_info.win, true)
   else
     state.current_buf = vim.api.nvim_get_current_buf()
     state.current_win = vim.api.nvim_get_current_win()
     state.buffers = get_open_buffers()
+    state.win_info = create_window(to_buffer_lines(state.buffers))
 
-    local buffers = to_buffer_lines(state.buffers)
-    local floaty_bits = create_window(buffers)
-
-    state.floating_buf = floaty_bits.buf
-    state.floating_win = floaty_bits.win
-
-    setup_autocommands(state.floating_buf, state.floating_win)
+    setup_autocommands(state.win_info.buf, state.win_info.win)
   end
 end
 
