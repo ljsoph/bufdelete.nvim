@@ -15,23 +15,7 @@ local default_config = {
 }
 
 function M.setup(opts)
-  local invalid_config = false
-
-  if type(config.width) == "string" and config.width ~= "shrink" then
-    M.error("invalid width configuration - available options ['shrink']")
-    invalid_config = true
-  end
-
-  if type(config.height) == "string" and config.width ~= "shrink" then
-    M.error("invalid height configuration - available options ['shrink']")
-    invalid_config = true
-  end
-
-  if invalid_config then
-    config = default_config
-  else
-    config = vim.tbl_deep_extend("force", default_config, opts or {})
-  end
+  config = vim.tbl_deep_extend("force", default_config, opts or {})
 end
 
 function M.error(msg, opts)
@@ -288,6 +272,16 @@ local setup_autocommands = function(buf, win)
 end
 
 M.toggle = function()
+  if type(config.width) == "string" and config.width ~= "shrink" then
+    M.error(string.format("invalid width configuration [%s] - available options ['shrink']", config.width))
+    config.width = default_config.width
+  end
+
+  if type(config.height) == "string" and config.height ~= "shrink" then
+    M.error(string.format("invalid height configuration [%s] - available options ['shrink']", config.height))
+    config.height = default_config.height
+  end
+
   if vim.api.nvim_win_is_valid(state.win_info.win) then
     vim.api.nvim_win_close(state.win_info.win, true)
   else
